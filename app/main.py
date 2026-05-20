@@ -8,6 +8,7 @@ never hold business logic (SPEC §5).
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from tortoise import Tortoise
 
 from app.config import settings
@@ -30,6 +31,18 @@ app = FastAPI(
     title=settings.app_name,
     version="0.1.0",
     lifespan=lifespan,
+)
+
+# CORS: the browser-facing frontend lives on a different origin. Without
+# this middleware preflight (OPTIONS) requests fail and the SPA can't talk
+# to the API at all. Origins are configurable via the CORS_ORIGINS env var
+# (see app.config.Settings.cors_origins).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 register_exception_handlers(app)

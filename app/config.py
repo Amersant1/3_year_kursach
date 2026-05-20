@@ -5,9 +5,10 @@ suitable for production — override JWT_SECRET in real deployments.
 """
 
 from functools import lru_cache
+from typing import Annotated
 
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -18,6 +19,23 @@ class Settings(BaseSettings):
     # --- App ---
     app_name: str = "Portfolio Manager API"
     debug: bool = False
+
+    # --- CORS ---
+    # Comma-separated list of allowed origins for the browser-facing API.
+    # Override via the CORS_ORIGINS env var in production
+    # (e.g. CORS_ORIGINS=https://app.example.com,https://staging.example.com).
+    # ``NoDecode`` keeps pydantic-settings from JSON-decoding the env value
+    # so the validator below receives the raw string and splits it.
+    cors_origins: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["http://localhost:3000"]
+    )
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _split_cors_origins(cls, v):
+        if isinstance(v, str):
+            return [o.strip() for o in v.split(",") if o.strip()]
+        return v
 
     # --- PostgreSQL ---
     postgres_host: str = "postgres"
