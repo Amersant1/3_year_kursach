@@ -5,7 +5,9 @@
 from __future__ import annotations
 
 from app.core.errors import NotFoundError
-from app.models import Position, User
+from app.models import Asset, AssetQuote, Position, PriceBar, User
+from app.services import market_data
+from app.services.analytics import valuation
 
 
 async def list_for_user(
@@ -24,9 +26,35 @@ async def get_for_user(*, user: User, position_id: int) -> Position:
     return p
 
 
-# PnL computation lives here and stays a no-op until iteration 3 wires the
-# pricing providers. The endpoint contract is final from day one.
-def attach_pnl(position: Position) -> Position:
-    # TODO(iteration-3): fetch current price via pricing service and fill
-    # current_price / market_value / pnl_absolute / pnl_percent.
+async def attach_pnl(position: Position) -> Position:
+    """Populate the PnL fields on a Position from the latest prices (SPEC §3).
+
+    Mutates the in-memory object only (does not persist) — the serializer
+    reads the extra ``current_price`` / ``market_value`` / ``pnl_*`` attrs.
+    """
+    asset = await Asset.get_or_none(id=position.asset_id)
+    if asset is None:
+        return position
+    quote = await AssetQuote.get_or_none(asset_id=position.asset_id)
+    if quote is not None:
+        price = quote.price
+        day_change = quote.change_24h
+    else:
+        last = await PriceBar.filter(asset_id=position.asset_id).order_by("-day").first()
+        price = last.close if last else position.entry_price
+        day_change = None
+    price_fx = await market_data.fx_to_base(asset.currency)
+    cost_fx = await market_data.fx_to_base(position.currency)
+    v = valuation.value_position(
+        quantity=position.quantity,
+        current_price=price,
+        price_fx=price_fx,
+        entry_price=position.entry_price,
+        cost_fx=cost_fx,
+        day_change=day_change,
+    )
+    position.current_price = v["current_price"]
+    position.market_value = v["market_value"]
+    position.pnl_absolute = v["pnl"]
+    position.pnl_percent = v["pnl_pct"]
     return position

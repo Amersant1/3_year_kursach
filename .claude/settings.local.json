@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run *)",
+      "Bash(grep -vE \"Warning|warning|super\\\\\\(\\\\\\)|return self|decoded =|^\\\\s*$|Docs:\")",
+      "Bash(timeout 90 env POSTGRES_HOST=localhost uv run python -c ' *)"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\сергей\\.claude\\projects\\c--Users--------Documents-projects-studying-kursach-3-year\\memory"
+    ]
+  }
+}

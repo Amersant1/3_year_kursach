@@ -38,6 +38,27 @@ class Settings(BaseSettings):
     price_refresh_interval: int = 60 * 15
     snapshot_interval: int = 60 * 60
 
+    # --- Analytics ---
+    # Base reporting currency: all values are converted into it for
+    # aggregation/metrics (frontend uses RUB).
+    base_currency: str = "RUB"
+    # Risk-free rate used in Sharpe/Sortino/CAPM (frontend default 7%).
+    risk_free_rate: float = 0.07
+    # Trading days per year (annualization factor).
+    trading_days: int = 252
+    # Benchmark symbol the dashboard compares against.
+    benchmark_symbol: str = "IMOEX"
+
+    # --- Pricing providers ---
+    # Per-request timeout (seconds) for all external price calls — keeps the
+    # service responsive and enables graceful degradation (SPEC §3).
+    price_http_timeout: float = 8.0
+    moex_base_url: str = "https://iss.moex.com/iss"
+    coingecko_base_url: str = "https://api.coingecko.com/api/v3"
+    yahoo_base_url: str = "https://query1.finance.yahoo.com"
+    # How many days of history to backfill when first pricing an asset.
+    history_days: int = 365
+
     @property
     def database_url(self) -> str:
         """asyncpg DSN consumed by Tortoise/Aerich."""
