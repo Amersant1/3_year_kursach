@@ -1,8 +1,14 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, File, UploadFile, status
 
 from app.core.deps import get_current_user
+from app.core.errors import ConflictError
 from app.models import User
-from app.schemas.transaction import TransactionCreate, TransactionOut
+from app.schemas.transaction import (
+    ImportResult,
+    ImportRowError,
+    TransactionCreate,
+    TransactionOut,
+)
 from app.services import transaction_service
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
@@ -44,3 +50,25 @@ async def get(
         user=user, transaction_id=transaction_id
     )
     return TransactionOut.model_validate(tx)
+
+
+@router.post(
+    "/import",
+    response_model=ImportResult,
+    summary="Bulk-import transactions from a CSV file (best-effort)",
+)
+async def import_csv(
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+) -> ImportResult:
+    data = await file.read()
+    if not data:
+        raise ConflictError("Empty file uploaded", code="bad_csv")
+    created, errors, total = await transaction_service.import_csv(
+        user=user, file_bytes=data
+    )
+    return ImportResult(
+        created=[TransactionOut.model_validate(t) for t in created],
+        errors=[ImportRowError(row=r, error=e) for r, e in errors],
+        total_rows=total,
+    )

@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 class ReportFormat(str, Enum):
     CSV = "csv"
     XLSX = "xlsx"
-    # PDF is intentionally not offered yet (planned next iteration).
+    PDF = "pdf"
 
 
 class ReportSection(str, Enum):

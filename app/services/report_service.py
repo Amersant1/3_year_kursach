@@ -236,6 +236,96 @@ def _render_xlsx(sections: list[Section]) -> bytes:
     return out.getvalue()
 
 
+def _render_pdf(sections: list[Section], title: str) -> bytes:
+    """Render report sections as a multi-page PDF (reportlab).
+
+    Layout is intentionally simple: one heading per section, table with
+    striped header, page breaks between sections, footer with timestamp.
+    """
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (
+        PageBreak,
+        Paragraph,
+        SimpleDocTemplate,
+        Spacer,
+        Table,
+        TableStyle,
+    )
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=landscape(A4),
+        leftMargin=12 * mm,
+        rightMargin=12 * mm,
+        topMargin=14 * mm,
+        bottomMargin=14 * mm,
+        title=title,
+    )
+    styles = getSampleStyleSheet()
+    h = ParagraphStyle(
+        "H",
+        parent=styles["Heading1"],
+        fontSize=16,
+        spaceAfter=8,
+    )
+    sub = ParagraphStyle(
+        "Sub",
+        parent=styles["Normal"],
+        fontSize=9,
+        textColor=colors.grey,
+        spaceAfter=10,
+    )
+    sec_style = ParagraphStyle(
+        "Sec",
+        parent=styles["Heading2"],
+        fontSize=13,
+        spaceBefore=4,
+        spaceAfter=6,
+    )
+
+    story: list = [Paragraph(title, h)]
+    story.append(
+        Paragraph(
+            f"Сгенерировано: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
+            sub,
+        )
+    )
+
+    for i, sec in enumerate(sections):
+        if i > 0:
+            story.append(PageBreak())
+        story.append(Paragraph(sec.title, sec_style))
+        if not sec.rows:
+            story.append(Paragraph("<i>Нет данных</i>", styles["Italic"]))
+            continue
+        data = [sec.headers] + [[str(c) for c in row] for row in sec.rows]
+        t = Table(data, repeatRows=1)
+        t.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#15140F")),
+                    ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#D7E041")),
+                    ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 8),
+                    ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+                    ("TOPPADDING", (0, 0), (-1, 0), 6),
+                    ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#FBF9F4")]),
+                    ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#E5E1D6")),
+                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ]
+            )
+        )
+        story.append(t)
+        story.append(Spacer(1, 6))
+
+    doc.build(story)
+    return buf.getvalue()
+
+
 async def generate(user: User, *, portfolio_id, sections, fmt, days=None) -> Report:
     built = await _build_sections(user, portfolio_id, sections, days)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
@@ -245,6 +335,17 @@ async def generate(user: User, *, portfolio_id, sections, fmt, days=None) -> Rep
             filename=f"curs_report_{scope}_{stamp}.csv",
             media_type="text/csv; charset=utf-8",
             content=_render_csv(built),
+        )
+    if fmt == ReportFormat.PDF:
+        title = (
+            "CURS — отчёт по всем портфелям"
+            if portfolio_id is None
+            else f"CURS — отчёт по портфелю #{portfolio_id}"
+        )
+        return Report(
+            filename=f"curs_report_{scope}_{stamp}.pdf",
+            media_type="application/pdf",
+            content=_render_pdf(built, title),
         )
     return Report(
         filename=f"curs_report_{scope}_{stamp}.xlsx",

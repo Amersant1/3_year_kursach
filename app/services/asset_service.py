@@ -3,8 +3,8 @@
 
 from __future__ import annotations
 
-from app.core.errors import NotFoundError
-from app.models import Asset, AssetFundamentals
+from app.core.errors import ConflictError, NotFoundError
+from app.models import Asset, AssetFundamentals, Position, Transaction
 from app.models.asset import AssetClass, PricingProvider
 
 
@@ -58,3 +58,42 @@ async def get_asset(asset_id: int) -> Asset:
     if asset is None:
         raise NotFoundError("Asset not found", code="asset_not_found")
     return asset
+
+
+async def update_asset(asset_id: int, fields: dict) -> Asset:
+    """Patch descriptive metadata. Immutable fields (symbol/asset_class/currency)
+    are filtered out at the schema layer; we only persist supplied keys.
+    """
+    asset = await get_asset(asset_id)
+    if not fields:
+        return asset
+    for k, v in fields.items():
+        setattr(asset, k, v)
+    await asset.save()
+    return asset
+
+
+async def delete_asset(asset_id: int) -> None:
+    """Hard-delete an asset.
+
+    Blocks if the asset is referenced by any position or transaction
+    (would orphan domain history). Quote/history rows die via ON DELETE
+    CASCADE in the schema.
+    """
+    asset = await get_asset(asset_id)
+    if await Position.filter(asset_id=asset_id).exists():
+        raise ConflictError(
+            "Asset is referenced by positions — close them before deleting",
+            code="asset_in_use",
+        )
+    if await Transaction.filter(asset_id=asset_id).exists():
+        raise ConflictError(
+            "Asset is referenced by transactions — cannot delete",
+            code="asset_in_use",
+        )
+    if await Transaction.filter(source_asset_id=asset_id).exists():
+        raise ConflictError(
+            "Asset is referenced by transfer transactions — cannot delete",
+            code="asset_in_use",
+        )
+    await asset.delete()

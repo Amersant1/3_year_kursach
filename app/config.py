@@ -6,7 +6,7 @@ suitable for production — override JWT_SECRET in real deployments.
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,6 +18,20 @@ class Settings(BaseSettings):
     # --- App ---
     app_name: str = "Portfolio Manager API"
     debug: bool = False
+    # CORS allow-list (comma-separated). "*" allows any origin (handy in dev).
+    cors_origins: list[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ]
+    )
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _split_cors(cls, v):
+        if isinstance(v, str):
+            return [s.strip() for s in v.split(",") if s.strip()]
+        return v
 
     # --- PostgreSQL ---
     postgres_host: str = "postgres"

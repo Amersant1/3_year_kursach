@@ -210,3 +210,122 @@ async def get_for_user(*, user: User, transaction_id: int) -> Transaction:
     if tx is None:
         raise NotFoundError("Transaction not found", code="transaction_not_found")
     return tx
+
+
+async def import_csv(
+    *, user: User, file_bytes: bytes
+) -> tuple[list[Transaction], list[tuple[int, str]], int]:
+    """Best-effort bulk import.
+
+    Each row is validated and inserted through :func:`create` so all of the
+    same domain rules (currency mismatch, overdraft, transfer-source rules)
+    apply. A failing row does **not** abort the rest of the file — its
+    error is collected and we move on.
+
+    Supported columns (header row, comma-separated, UTF-8):
+
+    - ``tx_type``           — ``input`` / ``transfer`` / ``output``
+    - ``asset_id`` *or* ``asset_symbol``[+ ``asset_class``]
+    - ``quantity``          — decimal, > 0
+    - ``price``             — decimal, >= 0
+    - ``currency``          — ISO-like, max 16 chars
+    - ``portfolio_id`` *or* ``portfolio_name`` (optional)
+    - ``source_asset_id`` *or* ``source_asset_symbol`` (required for transfer)
+    - ``source_quantity`` / ``source_currency`` (required for transfer)
+    - ``timestamp`` (optional, ISO-8601)
+    """
+    import csv
+    import io
+
+    from app.schemas.transaction import TransactionCreate
+    from pydantic import ValidationError
+
+    text = file_bytes.decode("utf-8-sig", errors="replace")
+    reader = csv.DictReader(io.StringIO(text))
+    if reader.fieldnames is None:
+        raise ConflictError("CSV is empty or missing header row", code="bad_csv")
+
+    # Caches so we don't hammer the DB per row.
+    asset_by_id: dict[int, Asset] = {}
+    asset_by_sym: dict[tuple[str, str | None], Asset] = {}
+    portfolios: dict[int | str, Portfolio] = {}
+
+    async def resolve_asset(row: dict) -> int:
+        if (raw := row.get("asset_id", "").strip()):
+            aid = int(raw)
+            if aid not in asset_by_id:
+                a = await Asset.get_or_none(id=aid)
+                if a is None:
+                    raise ValueError(f"asset_id {aid} not found")
+                asset_by_id[aid] = a
+            return aid
+        sym = (row.get("asset_symbol") or "").strip()
+        cls = (row.get("asset_class") or "").strip() or None
+        if not sym:
+            raise ValueError("asset_id or asset_symbol required")
+        key = (sym, cls)
+        if key in asset_by_sym:
+            return asset_by_sym[key].id
+        qs = Asset.filter(symbol=sym)
+        if cls:
+            qs = qs.filter(asset_class=cls)
+        a = await qs.first()
+        if a is None:
+            raise ValueError(f"asset_symbol {sym!r} not found")
+        asset_by_sym[key] = a
+        return a.id
+
+    async def resolve_portfolio(row: dict) -> int | None:
+        if (raw := (row.get("portfolio_id") or "").strip()):
+            pid = int(raw)
+            if pid not in portfolios:
+                p = await Portfolio.get_or_none(id=pid, user_id=user.id)
+                if p is None:
+                    raise ValueError(f"portfolio_id {pid} not found")
+                portfolios[pid] = p
+            return pid
+        name = (row.get("portfolio_name") or "").strip()
+        if not name:
+            return None
+        if name in portfolios:
+            return portfolios[name].id
+        p = await Portfolio.get_or_none(name=name, user_id=user.id)
+        if p is None:
+            raise ValueError(f"portfolio_name {name!r} not found")
+        portfolios[name] = p
+        return p.id
+
+    created: list[Transaction] = []
+    errors: list[tuple[int, str]] = []
+    total = 0
+    for i, row in enumerate(reader, start=1):
+        total += 1
+        try:
+            asset_id = await resolve_asset(row)
+            portfolio_id = await resolve_portfolio(row)
+            source_asset_id: int | None = None
+            if (raw := (row.get("source_asset_id") or "").strip()):
+                source_asset_id = int(raw)
+            elif (sym := (row.get("source_asset_symbol") or "").strip()):
+                a = await Asset.filter(symbol=sym).first()
+                if a is None:
+                    raise ValueError(f"source_asset_symbol {sym!r} not found")
+                source_asset_id = a.id
+
+            payload = TransactionCreate(
+                tx_type=row["tx_type"].strip().lower(),  # type: ignore[arg-type]
+                asset_id=asset_id,
+                quantity=row["quantity"],
+                price=row["price"],
+                currency=row["currency"].strip(),
+                source_asset_id=source_asset_id,
+                source_quantity=(row.get("source_quantity") or None) or None,
+                source_currency=(row.get("source_currency") or None) or None,
+                timestamp=(row.get("timestamp") or None) or None,
+                portfolio_id=portfolio_id,
+            )
+            tx = await create(user=user, payload=payload)
+            created.append(tx)
+        except (ValueError, KeyError, ValidationError, ConflictError, NotFoundError) as e:
+            errors.append((i, str(e)))
+    return created, errors, total

@@ -8,6 +8,7 @@ from app.schemas.asset import (
     AssetCreate,
     AssetOut,
     AssetQuoteOut,
+    AssetUpdate,
     FundamentalsIn,
     FundamentalsOut,
     ManualPriceIn,
@@ -47,6 +48,31 @@ async def list_(_: User = Depends(get_current_user)) -> list[AssetOut]:
 @router.get("/{asset_id}", response_model=AssetOut, summary="Get an asset by id")
 async def get(asset_id: int, _: User = Depends(get_current_user)) -> AssetOut:
     return AssetOut.model_validate(await asset_service.get_asset(asset_id))
+
+
+@router.patch(
+    "/{asset_id}",
+    response_model=AssetOut,
+    summary="Update an asset's descriptive metadata",
+)
+async def update(
+    asset_id: int,
+    payload: AssetUpdate,
+    _: User = Depends(get_current_user),
+) -> AssetOut:
+    asset = await asset_service.update_asset(
+        asset_id, payload.model_dump(exclude_unset=True)
+    )
+    return AssetOut.model_validate(asset)
+
+
+@router.delete(
+    "/{asset_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete an asset (only if no positions/transactions reference it)",
+)
+async def delete(asset_id: int, _: User = Depends(get_current_user)) -> None:
+    await asset_service.delete_asset(asset_id)
 
 
 @router.post(

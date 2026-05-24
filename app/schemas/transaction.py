@@ -68,3 +68,19 @@ class TransactionOut(BaseModel):
     source_currency: str | None
     timestamp: datetime
     created_at: datetime
+
+
+class ImportRowError(BaseModel):
+    """Per-row failure during CSV import — row index (1-based, excludes header)
+    and the error message."""
+
+    row: int
+    error: str
+
+
+class ImportResult(BaseModel):
+    """Result of POST /transactions/import."""
+
+    created: list[TransactionOut]
+    errors: list[ImportRowError]
+    total_rows: int

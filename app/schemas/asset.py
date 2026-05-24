@@ -18,6 +18,20 @@ class AssetCreate(BaseModel):
     provider_symbol: str | None = Field(default=None, max_length=128)
 
 
+class AssetUpdate(BaseModel):
+    """Partial update for an asset's descriptive metadata.
+
+    Immutable: ``symbol``, ``asset_class`` (they form the unique pair) and
+    ``currency`` (changing it would corrupt already-stored quotes/positions).
+    """
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    sector: str | None = Field(default=None, max_length=64)
+    region: str | None = Field(default=None, max_length=16)
+    pricing_provider: PricingProvider | None = None
+    provider_symbol: str | None = Field(default=None, max_length=128)
+
+
 class AssetOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
